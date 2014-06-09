@@ -405,6 +405,15 @@ public class OverlayView extends View {
 	private void updatePerspectiveProjectionMatrix() {
 		mPerspectiveProjectionMatrix.setToProjection(1 - mViewAspectRatio, 1000, mPerspectiveFOV, mViewAspectRatio);
 	}
+	
+	public int getDisplayRotation() {
+		return mDisplayRotation;
+	}
+
+	public void setDisplayRotation(int mDisplayRotation) {
+		this.mDisplayRotation = mDisplayRotation;
+	}
+	
 
 	/**
 	 * logging if debug enabled

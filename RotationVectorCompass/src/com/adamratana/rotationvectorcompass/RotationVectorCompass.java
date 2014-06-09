@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.hardware.Camera;
 import android.hardware.Camera.CameraInfo;
 import android.hardware.Sensor;
@@ -13,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Display;
+import android.view.OrientationEventListener;
 import android.view.Surface;
 import android.view.View;
 import android.view.Window;
@@ -127,8 +129,13 @@ public class RotationVectorCompass extends Activity implements RotationUpdateDel
 	private int mNumCameras;
 	private int mDefaultCameraID = -1; // The first rear facing camera
 	private boolean mFullScreen = false;
-	private boolean mPerspectiveProjection = true;
+	private boolean mPerspectiveProjection = false;
 	private boolean mOrientationLocked = false;
+	
+	private WindowManager mWindowManager;
+	OrientationEventListener myOrientationEventListener;
+	private int mLastRotation = 0;
+	
 
 	@SuppressLint("NewApi")
 	@Override
@@ -167,10 +174,25 @@ public class RotationVectorCompass extends Activity implements RotationUpdateDel
 		mOverlayView.setPerspectiveProjection(mPerspectiveProjection);
 		mOverlayView.setFOV(DEFAULT_FOV);
 
+		@SuppressWarnings("deprecation")
+		int mDisplayRotation = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.FROYO) ? display.getRotation() : display.getOrientation();
+		mOverlayView.setDisplayRotation(mDisplayRotation);
+		
 		// seekbar which controls fov (perspective) and scale (orthographic)
 		mScaleAndFOVSlider = (SeekBar) findViewById(R.id.fov_bar);
 		mScaleAndFOVSlider.setProgress(mPerspectiveProjection ? (int) ((mFOV - MIN_FOV) / (MAX_FOV - MIN_FOV) * 1000f) : (int) ((mOrthographicScale - MIN_ORTHO_SCALE) / (MAX_ORTHO_SCALE - MIN_ORTHO_SCALE) * 1000f));
 
+		
+		mWindowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+		myOrientationEventListener = new OrientationEventListener(this, SensorManager.SENSOR_DELAY_GAME) {
+
+			@Override
+			public void onOrientationChanged(int orientation) {
+				int rotation = mWindowManager.getDefaultDisplay().getRotation();
+				mLastRotation = rotation;
+			}
+		};
+		
 		// Orientation Lock Toggle
 		final ToggleButton lockOrientationToggleButton = (ToggleButton) findViewById(R.id.lock_toggle);
 		lockOrientationToggleButton.setChecked(mOrientationLocked);
@@ -385,20 +407,38 @@ public class RotationVectorCompass extends Activity implements RotationUpdateDel
 	public void onRotationUpdate(float[] newMatrix) {
 		// remap matrix values according to display rotation, as in
 		// SensorManager documentation.
-		switch (mDisplayRotation) {
-		case Surface.ROTATION_0:
-		case Surface.ROTATION_180:
-			break;
+		
+		final float[] copyMatrix = newMatrix.clone();
+		
+		int x_axis = SensorManager.AXIS_X;
+		int y_axis = SensorManager.AXIS_Y;
+
+		//instead of using mDisplayRotation, use the last rotation updated 
+		//from OrientationEventListener event to correct issue with quick 180 degree flip
+
+		//switch (mDisplayRotation) {
+		switch (mLastRotation) {
+		case Surface.ROTATION_0: break;
 		case Surface.ROTATION_90:
-			SensorManager.remapCoordinateSystem(newMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, newMatrix);
+			x_axis = SensorManager.AXIS_Y;
+			y_axis = SensorManager.AXIS_MINUS_X;
 			break;
-		case Surface.ROTATION_270:
-			SensorManager.remapCoordinateSystem(newMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, newMatrix);
+		case Surface.ROTATION_180:
+			x_axis = SensorManager.AXIS_MINUS_X;
+			y_axis = SensorManager.AXIS_MINUS_Y;
+			break;
+		case Surface.ROTATION_270: 
+			x_axis = SensorManager.AXIS_MINUS_Y;
+			y_axis = SensorManager.AXIS_X;
 			break;
 		default:
 			break;
 		}
-		mRotationMatrix.set(newMatrix);
+
+		SensorManager.remapCoordinateSystem(newMatrix, x_axis, y_axis, copyMatrix);
+		
+		mRotationMatrix.set(copyMatrix);
+		
 		updateViews();
 	}
 
@@ -422,6 +462,7 @@ public class RotationVectorCompass extends Activity implements RotationUpdateDel
 	protected void onPause() {
 		super.onPause();
 		mSensorManager.unregisterListener(mMagAccel);
+		myOrientationEventListener.disable();
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.GINGERBREAD && mUseRotationVector) {
 			mSensorManager.unregisterListener(mRotationVector);
 		}
@@ -434,8 +475,21 @@ public class RotationVectorCompass extends Activity implements RotationUpdateDel
 	protected void onResume() {
 		super.onResume();
 		applySensors(mUseRotationVector);
+		myOrientationEventListener.enable();
 		if (mCameraOn) {
 			startCamera();
 		}
 	}
+	
+	@SuppressLint("NewApi")
+	@Override
+	public void onConfigurationChanged(Configuration newConfig) {
+		super.onConfigurationChanged(newConfig);
+
+		Display display = ((WindowManager) getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
+		@SuppressWarnings("deprecation")
+		int mDisplayRotation = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.FROYO) ? display.getRotation() : display.getOrientation();
+
+		mOverlayView.setDisplayRotation(mDisplayRotation);
+	}	
 }
